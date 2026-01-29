@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Juego del Impostor</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+</head>
+
+<body>
+
+    <div class="container">
+
+        <!-- HOME VIEW -->
+        <div id="home-view" class="view-section card">
+            <div class="mascot-container">🕵️‍♂️</div>
+            <h1>Secret Agent</h1>
+            <input type="text" id="player-name" placeholder="Tu Nombre de Agente">
+            <button onclick="createGame()">Crear Misión</button>
+            <button class="secondary" onclick="showJoinView()">Unirse a Misión</button>
+        </div>
+
+        <!-- JOIN VIEW -->
+        <div id="join-view" class="view-section card hidden">
+            <h2>Ingresar Código</h2>
+            <input type="text" id="room-code-input" placeholder="ABCD" maxlength="4" style="text-transform:uppercase;">
+            <button onclick="joinGame()">Acceder</button>
+            <button class="secondary" onclick="showHomeView()">Cancelar</button>
+        </div>
+
+        <!-- LOBBY VIEW -->
+        <div id="lobby-view" class="view-section card hidden">
+            <h2 class="animate__animated animate__pulse animate__infinite">Sala: <span id="lobby-code"></span></h2>
+            <h3>Agentes en espera...</h3>
+            <ul id="lobby-player-list"></ul>
+
+            <div id="host-controls" class="hidden">
+                <select id="difficulty-select">
+                    <option value="Fácil">Fácil</option>
+                    <option value="Media" selected>Media</option>
+                    <option value="Difícil">Difícil</option>
+                    <option value="Picante">Picante 🔥</option>
+                </select>
+                <button onclick="startGame()">DESPLEGAR OPERACIÓN</button>
+            </div>
+            <p id="waiting-msg">Esperando órdenes...</p>
+        </div>
+
+        <!-- GAME VIEW -->
+        <div id="game-view" class="view-section card hidden">
+            <div class="header">
+                <span class="category-badge animate__animated animate__fadeInDown">Memoriza tu palabra</span>
+            </div>
+
+            <div class="reveal-container" onmousedown="openCurtain()" onmouseup="closeCurtain()"
+                ontouchstart="openCurtain()" ontouchend="closeCurtain()">
+                <div class="secret-info">
+                    <h2 id="role-title" style="margin:5px 0">...</h2>
+                    <h1 id="secret-word" style="font-size:3rem; margin:10px 0; color:#03DAC6;">...</h1>
+                    <p id="role-desc">...</p>
+                </div>
+                <div id="curtain" class="curtain"> CONFIDENCIAL </div>
+                <div class="rope"></div>
+            </div>
+
+            <div id="game-status">
+                <div class="turn-list">
+                    <strong>Orden de Turnos:</strong>
+                    <div id="turn-order-list"></div>
+                </div>
+
+                <div id="debate-section" class="hidden animate__animated animate__fadeIn">
+                    <h3>🗣️ Debate</h3>
+                    <div id="timer" style="font-size:3rem; color:#ffeb3b; font-weight:bold;">60</div>
+                </div>
+            </div>
+
+            <button id="btn-start-debate" onclick="startDebate()">Iniciar Debate</button>
+            <button id="btn-start-vote" class="hidden" onclick="goToVoting()">Ir a Votación</button>
+        </div>
+
+        <!-- VOTING VIEW -->
+        <div id="voting-view" class="view-section card hidden">
+            <h2 class="animate__animated animate__shakeX">¿Quién miente?</h2>
+            <div id="voting-list"></div>
+        </div>
+
+        <!-- GUESSING VIEW (MANUAL INPUT) -->
+        <div id="guessing-view" class="view-section card hidden">
+            <h2 style="color: #CF6679;" class="animate__animated animate__tada">¡Te descubrieron!</h2>
+            <p>Escribe la palabra secreta exacta para robar la victoria:</p>
+            <input type="text" id="impostor-input" placeholder="Escribe aquí..."
+                style="background: rgba(255,255,255,0.1); font-size: 1.5rem;">
+            <button onclick="sendManualGuess()">Intentar 🤞</button>
+        </div>
+
+        <div id="waiting-guess-view" class="view-section card hidden">
+            <h2>😱 ¡Atrapado!</h2>
+            <p>El impostor está intentando adivinar...</p>
+            <div style="font-size:3rem" class="animate__animated animate__flash animate__infinite">⏳</div>
+        </div>
+
+        <!-- RESULTS VIEW -->
+        <div id="results-view" class="view-section card hidden">
+            <h1 id="winner-title" class="animate__animated animate__zoomIn">...</h1>
+            <div class="result-details">
+                <p id="result-msg">...</p>
+                <p>Impostor: <strong id="impostor-name">...</strong></p>
+                <p>Palabra Real: <strong id="reveal-word">...</strong></p>
+            </div>
+            <button onclick="resetGame()">Nueva Misión</button>
+        </div>
+
+    </div>
+
+    <!-- FLOATING CHAT -->
+    <div class="chat-badge" onclick="toggleChat()">💬</div>
+    <div id="chat-window" class="chat-window">
+        <div class="chat-header">Chat de Misión <span style="float:right; cursor:pointer"
+                onclick="toggleChat()">✖</span></div>
+        <div id="chat-messages" class="chat-messages"></div>
+        <div class="chat-input-area">
+            <input type="text" id="chat-input" placeholder="..." onkeypress="handleChatKey(event)">
+            <button onclick="sendChat()">➤</button>
+        </div>
+    </div>
+
+    <div id="spotlight-overlay">
+        <div class="spotlight-text">INICIA:</div>
+        <div class="spotlight-name" id="spotlight-name">AGENTE X</div>
+    </div>
+
+    <script>
+        const socket = io();
+        let myId = null;
+        let currentRoom = null;
+        let isHost = false;
+        let debateInterval = null;
+
+        // --- CURTAIN LOGIC ---
+        function openCurtain() { document.getElementById('curtain').style.transform = 'translateY(-100%)'; }
+        function closeCurtain() { document.getElementById('curtain').style.transform = 'translateY(0)'; }
+
+        // --- UTILS ---
+        function playConfetti() { confetti({ particleCount: 150, spread: 100, origin: { y: 0.6 } }); }
+        function showView(viewId) {
+            document.querySelectorAll('.view-section').forEach(el => el.classList.add('hidden'));
+            document.getElementById(viewId).classList.remove('hidden');
+        }
+        function showHomeView() { showView('home-view'); }
+        function showJoinView() { showView('join-view'); }
+
+        // --- ACTIONS ---
+        function createGame() {
+            const name = document.getElementById('player-name').value.trim();
+            if (!name) return alert("Nombre requerido");
+            socket.emit('create_game', { name: name });
+            isHost = true;
+        }
+        function joinGame() {
+            const name = document.getElementById('player-name').value.trim();
+            const code = document.getElementById('room-code-input').value.trim();
+            if (!name || !code) return alert("Datos incompletos");
+            socket.emit('join_game', { name: name, code: code });
+            isHost = false;
+        }
+        function startGame() { socket.emit('start_game', { code: currentRoom, difficulty: document.getElementById('difficulty-select').value }); }
+        function startDebate() {
+            document.getElementById('btn-start-debate').classList.add('hidden');
+            document.getElementById('debate-section').classList.remove('hidden');
+            document.getElementById('btn-start-vote').classList.remove('hidden');
+            let timeLeft = 60;
+            const t = document.getElementById('timer');
+            t.innerText = timeLeft;
+            if (debateInterval) clearInterval(debateInterval);
+            debateInterval = setInterval(() => {
+                timeLeft--; t.innerText = timeLeft;
+                if (timeLeft <= 0) { clearInterval(debateInterval); t.innerText = "¡TIEMPO!"; }
+            }, 1000);
+        }
+        function goToVoting() { socket.emit('start_voting', { code: currentRoom }); }
+        function castVote(target) {
+            socket.emit('vote_player', { code: currentRoom, target_sid: target });
+            showView('lobby-view');
+            document.getElementById('lobby-player-list').innerHTML = '<li>Voto registrado. 🔒</li>';
+        }
+
+        function sendManualGuess() {
+            const guess = document.getElementById('impostor-input').value.trim();
+            if (!guess) return;
+            socket.emit('impostor_guess', { code: currentRoom, guess: guess });
+        }
+
+        function resetGame() { if (isHost) socket.emit('reset_game', { code: currentRoom }); }
+
+        // --- CHAT ---
+        function toggleChat() { document.getElementById('chat-window').classList.toggle('open'); }
+        function sendChat() {
+            const i = document.getElementById('chat-input');
+            if (i.value.trim()) { socket.emit('send_chat', { code: currentRoom, message: i.value }); i.value = ''; }
+        }
+        function handleChatKey(e) { if (e.key === 'Enter') sendChat(); }
+
+        // --- SOCKET ---
+        socket.on('connect', () => myId = socket.id);
+        socket.on('error_message', d => alert(d.msg));
+
+        socket.on('game_joined', d => {
+            currentRoom = d.code;
+            document.getElementById('lobby-code').innerText = d.code;
+            showView('lobby-view');
+            if (isHost) {
+                document.getElementById('host-controls').classList.remove('hidden');
+                document.getElementById('waiting-msg').classList.add('hidden');
+            } else {
+                document.getElementById('host-controls').classList.add('hidden');
+                document.getElementById('waiting-msg').classList.remove('hidden');
+            }
+        });
+
+        socket.on('update_game', g => {
+            const list = document.getElementById('lobby-player-list');
+            list.innerHTML = g.players.map(p => `<li>${p.name} ${p.sid === myId ? '(YO)' : ''}</li>`).join('');
+
+            if (g.state === 'LOBBY') {
+                showView('lobby-view');
+                document.getElementById('debate-section').classList.add('hidden');
+                document.getElementById('btn-start-debate').classList.remove('hidden');
+                document.getElementById('btn-start-vote').classList.add('hidden');
+            } else if (g.state === 'HINT') {
+                showView('game-view');
+                const ol = document.getElementById('turn-order-list');
+                ol.innerHTML = g.turn_order.map((n, i) => `<div class="turn-item">${i + 1}. ${n}</div>`).join('');
+            } else if (g.state === 'VOTING') {
+                showView('voting-view');
+                document.getElementById('voting-list').innerHTML = g.players.map(p =>
+                    p.sid !== myId ? `<button class="vote-btn" onclick="castVote('${p.sid}')">${p.name} 🎯</button>` : ''
+                ).join('');
+            } else if (g.state === 'GUESSING') {
+                showView('waiting-guess-view');
+            }
+        });
+
+        socket.on('role_assigned', d => {
+            const t = document.getElementById('role-title');
+            const w = document.getElementById('secret-word');
+            const desc = document.getElementById('role-desc');
+
+            if (d.is_impostor) {
+                t.innerText = "IMPOSTOR (CONFIDENCIAL)";
+                t.style.color = "#CF6679";
+                w.innerText = d.secret;
+                desc.innerText = "Tu palabra es falsa. Trata de encajar.";
+            } else {
+                t.innerText = "AGENTE CIUDADANO";
+                t.style.color = "#03DAC6";
+                w.innerText = d.secret;
+                desc.innerText = "Encuentra al espía infiltrado.";
+            }
+        });
+
+        socket.on('spotlight_announce', d => {
+            const o = document.getElementById('spotlight-overlay');
+            document.getElementById('spotlight-name').innerText = d.player;
+            o.classList.add('show');
+            setTimeout(() => o.classList.remove('show'), 3000);
+        });
+
+        socket.on('receive_chat', d => {
+            const c = document.getElementById('chat-messages');
+            const div = document.createElement('div');
+            div.className = `msg ${d.type} ${d.sender === document.getElementById('player-name').value ? 'self' : ''}`;
+            div.innerHTML = d.type === 'system' ? d.text : `<strong>${d.sender}:</strong> ${d.text}`;
+            c.appendChild(div);
+            c.scrollTop = c.scrollHeight;
+        });
+
+        socket.on('impostor_guess_start', () => {
+            showView('guessing-view');
+            // Clear input
+            document.getElementById('impostor-input').value = '';
+        });
+
+        socket.on('game_over', r => {
+            showView('results-view');
+            const t = document.getElementById('winner-title');
+            const m = document.getElementById('result-msg');
+
+            if (r.result === 'TIE') {
+                t.innerText = "EMPATE"; t.className = ""; m.innerText = "Nadie eliminado.";
+            } else if (r.winner === 'CIUDADANOS') {
+                t.innerText = "Misión Cumplida"; t.className = "result-win animate__animated animate__heartBeat";
+                playConfetti();
+            } else {
+                t.innerText = "Misión Fallida"; t.className = "result-loss animate__animated animate__rubberBand";
+            }
+
+            if (r.result !== 'TIE') {
+                m.innerText = r.guess_correct === undefined ? `Inocente eliminado: ${r.voted_out}` :
+                    (r.guess_correct ? `Impostor robó la victoria con "${r.guess}"` : `Impostor falló con "${r.guess}"`);
+            }
+
+            document.getElementById('impostor-name').innerText = r.impostor;
+            document.getElementById('reveal-word').innerText = r.secret;
+        });
+    </script>
+</body>
+
+</html>
